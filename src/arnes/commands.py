@@ -47,7 +47,7 @@ def cmd_connect() -> None:
     creds = load_credentials()
     creds[provider] = {"api_key": api_key, "base_url": base_url}
     save_credentials(creds)
-    console.print(f"[green]✓ Credenciales guardadas en {app_dir() / 'credentials.json'}[/green]")
+    console.print(f"[green]Credenciales guardadas en {app_dir() / 'credentials.json'}[/green]")
 
     role = _input("? Asignar este proveedor a un rol? [tutor/evaluador/ninguno]: ").strip()
     if role:
