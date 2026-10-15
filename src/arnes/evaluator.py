@@ -2,6 +2,7 @@ import json
 import re
 import statistics
 
+from .config import load_config
 from .provider import infer
 
 
@@ -13,7 +14,8 @@ def _extract_json(text: str) -> dict:
 
 
 def evaluate(response: str, rubric: dict, concept: dict, config: dict) -> dict:
-    config = config or load_config_safe()
+    if not isinstance(config, dict) or not config:
+        config = load_config()
     dimensions = {}
     if isinstance(rubric, dict):
         if "dimensions" in rubric and isinstance(rubric["dimensions"], dict):
@@ -22,13 +24,6 @@ def evaluate(response: str, rubric: dict, concept: dict, config: dict) -> dict:
             dimensions = rubric
     if not dimensions:
         dimensions = {"comprension": "Comprension general"}
-
-    try:
-        from .config import load_config
-
-        config = load_config()
-    except Exception:
-        pass
 
     concept_name = concept.get("concept", "") if isinstance(concept, dict) else str(concept)
     dimensions_text = "\n".join(f"- {name}: {desc}" for name, desc in dimensions.items())
@@ -108,11 +103,3 @@ def evaluate(response: str, rubric: dict, concept: dict, config: dict) -> dict:
         "rationale": rationale,
     }
 
-
-def load_config_safe() -> dict:
-    try:
-        from .config import load_config
-
-        return load_config()
-    except Exception:
-        return {}
