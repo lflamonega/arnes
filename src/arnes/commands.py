@@ -169,7 +169,7 @@ def cmd_new() -> str | None:
     if not logro:
         console.print("Logro vacio.")
         return None
-    raw = _input("? Que fuentes queres usar?\n  1. Conocimiento del modelo\n  2. Busqueda en internet\n  3. Mis propios archivos\n> ").strip()
+    raw = _input("? Fuentes (marcar varias separadas por coma, ej: 1,3):\n  1. Conocimiento del modelo\n  2. Busqueda en internet\n  3. Mis propios archivos\n> ").strip()
     selected_numbers = [item.strip() for item in raw.split(",") if item.strip()]
     mapping = {"1": "modelo", "2": "web", "3": "usuario"}
     fuentes = [mapping[number] for number in selected_numbers if number in mapping]
@@ -196,7 +196,10 @@ def cmd_new() -> str | None:
             if answer not in ("", "s", "si"):
                 _input("Presiona Enter cuando hayas terminado.\n")
 
-    generate_plan(session_id)
+    console.print("Generando plan. Esto puede tardar unos segundos...")
+    with console.status("Consultando al modelo y construyendo el plan..."):
+        generate_plan(session_id)
+    console.print("Plan generado.")
     plan_path = session_dir(session_id) / "plan.md"
     plan_text = plan_path.read_text(encoding="utf-8") if plan_path.exists() else ""
     concepts, rubric = parse_plan(plan_text)
