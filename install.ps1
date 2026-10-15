@@ -30,7 +30,7 @@ $pipxList = pipx list 2>&1
 if ($pipxList -match "arnes") {
     pipx upgrade arnes
 } else {
-    pipx install git+https://github.com/TU_USUARIO/arnes.git
+    pipx install git+https://github.com/lflamonega/arnes.git
 }
 
 $arnesCmd = Get-Command arnes -ErrorAction SilentlyContinue

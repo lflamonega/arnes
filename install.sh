@@ -41,7 +41,7 @@ fi
 if pipx list 2>/dev/null | grep -q arnes; then
     pipx upgrade arnes
 else
-    pipx install git+https://github.com/TU_USUARIO/arnes.git
+    pipx install git+https://github.com/lflamonega/arnes.git
 fi
 
 if ! command -v arnes >/dev/null 2>&1; then

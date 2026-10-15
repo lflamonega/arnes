@@ -29,5 +29,5 @@ y este proyecto adhiere a [Semantic Versioning](https://semver.org/lang/es/).
 - Script `install.ps1` para Windows.
 - README con instrucciones de instalacion, uso y desinstalacion.
 
-[Unreleased]: https://github.com/TU_USUARIO/arnes/compare/v0.0.1...HEAD
-[0.0.1]: https://github.com/TU_USUARIO/arnes/releases/tag/v0.0.1
+[Unreleased]: https://github.com/lflamonega/arnes/compare/v0.0.1...HEAD
+[0.0.1]: https://github.com/lflamonega/arnes/releases/tag/v0.0.1

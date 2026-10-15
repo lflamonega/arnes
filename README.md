@@ -1,19 +1,19 @@
 # arnes
 
-Arnes pedagogico minimalista para aprendizaje autodidacta.
+Arnés pedagógico minimalista para aprendizaje autodidacta.
 
 ## Instalacion
 
 macOS/Linux/WSL:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/TU_USUARIO/arnes/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/lflamonega/arnes/main/install.sh | bash
 ```
 
 Windows:
 
 ```powershell
-irm https://raw.githubusercontent.com/TU_USUARIO/arnes/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/lflamonega/arnes/main/install.ps1 | iex
 ```
 
 ## Uso
@@ -53,6 +53,9 @@ Borra tambien `~/.arnes/`.
 | /status | Estado |
 | /quit | Salir |
 
-## Version
+## Versión
 
 0.0.1
+
+## Licencia
+MIT
