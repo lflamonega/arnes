@@ -97,7 +97,9 @@ def present_diagnostic(session_id: str) -> None:
         "fuentes": _format_fuentes(session),
     }
     constraints, body = build_prompt("tutor.present.md", context)
-    output = infer("tutor", body, constraints)
+    with console.status("El modelo esta pensando..."):
+        output = infer("tutor", body, constraints)
+        output = output or ""
     ok, reason = validate(output, constraints)
     if not ok:
         append_log("validation_failed", session_id, {"reason": reason})
@@ -121,7 +123,9 @@ def present_concept(session_id: str) -> None:
         "fuentes": _format_fuentes(session),
     }
     constraints, body = build_prompt("tutor.present.md", context)
-    output = infer("tutor", body, constraints)
+    with console.status("El modelo esta pensando..."):
+        output = infer("tutor", body, constraints)
+        output = output or ""
     ok, reason = validate(output, constraints)
     if not ok:
         append_log("validation_failed", session_id, {"reason": reason})
@@ -165,7 +169,9 @@ def handle_user_message(text: str) -> None:
                 "puntajes": "",
             },
         )
-        output = infer("tutor", body, constraints)
+        with console.status("El modelo esta pensando..."):
+            output = infer("tutor", body, constraints)
+            output = output or ""
         console.print(output)
         return
 
@@ -183,7 +189,9 @@ def handle_user_message(text: str) -> None:
             "ultimo_intento": _last_user_response or text,
         }
         constraints, body = build_prompt("tutor.hint.md", context)
-        output = infer("tutor", body, constraints)
+        with console.status("El modelo esta pensando..."):
+            output = infer("tutor", body, constraints)
+            output = output or ""
         ok, reason = validate(output, constraints)
         if not ok:
             append_log("validation_failed", session_id, {"reason": reason})
@@ -218,7 +226,9 @@ def handle_user_message(text: str) -> None:
             "puntajes": _format_scores(result["scores"]),
         }
         constraints, body = build_prompt("tutor.feedback.md", context)
-        output = infer("tutor", body, constraints)
+        with console.status("El modelo esta pensando..."):
+            output = infer("tutor", body, constraints)
+            output = output or ""
         ok, reason = validate(output, constraints)
         if not ok:
             append_log("validation_failed", session_id, {"reason": reason})
@@ -293,7 +303,9 @@ def handle_user_message(text: str) -> None:
             "puntajes": _format_scores(result["scores"]),
         }
         constraints, body = build_prompt("tutor.feedback.md", context)
-        output = infer("tutor", body, constraints)
+        with console.status("El modelo esta pensando..."):
+            output = infer("tutor", body, constraints)
+            output = output or ""
         ok, reason = validate(output, constraints)
         if not ok:
             append_log("validation_failed", session_id, {"reason": reason})

@@ -17,7 +17,10 @@ def main() -> None:
         if not args[0].startswith("--"):
             print("Modo one-shot no implementado en esta version.")
             sys.exit(1)
-    run_repl()
+    try:
+        run_repl()
+    except KeyboardInterrupt:
+        print("\nInterrumpido. Hasta luego.")
 
 
 if __name__ == "__main__":

@@ -58,7 +58,8 @@ class OpenRouterProvider(InferenceProvider):
             raise RuntimeError(str(exc)) from exc
 
         data = json.loads(body)
-        return data["choices"][0]["message"]["content"]
+        content = data["choices"][0]["message"].get("content")
+        return content if content is not None else ""
 
 
 def infer(role: str, prompt: str, constraints: dict) -> str:
