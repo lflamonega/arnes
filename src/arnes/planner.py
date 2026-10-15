@@ -42,7 +42,7 @@ def generate_plan(session_id: str) -> None:
             {"logro": logro},
         )
         synthesis = infer("tutor", body, constraints)
-        target = root / "fuentes" / "apuntes_modelo" / "sintasis_inicial.md"
+        target = root / "fuentes" / "apuntes_modelo" / "sintesis_inicial.md"
         target = root / "fuentes" / "apuntes_modelo" / "sintesis_inicial.md"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(synthesis, encoding="utf-8")
