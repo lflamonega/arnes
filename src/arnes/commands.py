@@ -4,6 +4,8 @@ from pathlib import Path
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+from prompt_toolkit import PromptSession
+from prompt_toolkit.completion import WordCompleter
 
 from .config import DEFAULT_CONFIG, load_config, save_config, validate_config
 from .credentials import load_credentials, save_credentials
@@ -37,6 +39,18 @@ def _input(prompt: str) -> str:
         return input(prompt)
     except EOFError:
         return ""
+
+
+def _prompt_model(prompt: str, choices: list[str], default: str = "") -> str:
+    if not choices:
+        return _input(f"{prompt} [{default}]: ").strip() or default
+    completer = WordCompleter(choices, ignore_case=True, match_middle=True)
+    session = PromptSession(completer=completer)
+    try:
+        value = session.prompt(f"{prompt} [{default}]: ", complete_while_typing=True)
+    except (KeyboardInterrupt, EOFError):
+        return default
+    return value.strip() or default
 
 
 def cmd_connect() -> None:
@@ -104,16 +118,30 @@ def cmd_settings() -> None:
                     console.print(f"Modelos disponibles para {provider_name} (primeros 20):")
                     for model_name in remote_models[:20]:
                         console.print(f"  {model_name}")
-            config["roles"]["tutor"]["provider"] = _input(f"Provider tutor [{tutor['provider']}]: ").strip() or tutor["provider"]
-            config["roles"]["tutor"]["model"] = _input(f"Modelo tutor [{tutor.get('model', '')}]: ").strip()
+            tutor_provider = _input(f"Provider tutor [{tutor['provider']}]: ").strip() or tutor["provider"]
+            tutor_models = list_models(tutor_provider)
+            if tutor_models:
+                console.print(f"Modelos disponibles para {tutor_provider} ({len(tutor_models)}). Escribe para filtrar.")
+            tutor_model = _prompt_model("Modelo tutor", tutor_models, tutor.get("model", ""))
             temp = _input(f"Temperatura tutor [{tutor['temperature']}]: ").strip()
             if temp:
-                config["roles"]["tutor"]["temperature"] = float(temp)
-            config["roles"]["evaluador"]["provider"] = _input(f"Provider evaluador [{evaluador['provider']}]: ").strip() or evaluador["provider"]
-            config["roles"]["evaluador"]["model"] = _input(f"Modelo evaluador [{evaluador.get('model', '')}]: ").strip()
+                tutor["temperature"] = float(temp)
+
+            evaluador_provider = _input(f"Provider evaluador [{evaluador['provider']}]: ").strip() or evaluador["provider"]
+            evaluador_models = list_models(evaluador_provider)
+            if evaluador_models:
+                console.print(f"Modelos disponibles para {evaluador_provider} ({len(evaluador_models)}). Escribe para filtrar.")
+            evaluador_model = _prompt_model("Modelo evaluador", evaluador_models, evaluador.get("model", ""))
             temp = _input(f"Temperatura evaluador [{evaluador['temperature']}]: ").strip()
             if temp:
-                config["roles"]["evaluador"]["temperature"] = float(temp)
+                evaluador["temperature"] = float(temp)
+
+            config["roles"]["tutor"]["provider"] = tutor_provider
+            config["roles"]["tutor"]["model"] = tutor_model
+            config["roles"]["tutor"]["temperature"] = tutor["temperature"]
+            config["roles"]["evaluador"]["provider"] = evaluador_provider
+            config["roles"]["evaluador"]["model"] = evaluador_model
+            config["roles"]["evaluador"]["temperature"] = evaluador["temperature"]
         elif option == "2":
             raw = _input("Modelos del panel (separados por coma): ").strip()
             if raw:
