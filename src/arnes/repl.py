@@ -7,7 +7,7 @@ from prompt_toolkit.history import FileHistory
 from rich.console import Console
 from rich.markdown import Markdown
 
-from .commands import COMMANDS, cmd_connect, cmd_new, cmd_quit, handle_command
+from .commands import COMMANDS, cmd_connect, cmd_new, cmd_quit, cmd_settings, handle_command
 from .config import load_config
 from .credentials import credentials_path
 from .orchestrator import State, transition
