@@ -7,7 +7,7 @@ from rich.table import Table
 
 from .config import DEFAULT_CONFIG, load_config, save_config, validate_config
 from .credentials import load_credentials, save_credentials
-from .paths import app_dir
+from .paths import app_dir, session_dir
 from .planner import generate_plan, parse_plan
 from .store import create_session, load_session, save_session, load_estado, save_estado
 
