@@ -86,3 +86,25 @@ def infer(role: str, prompt: str, constraints: dict) -> str:
     constraints["_role"] = role
     append_log("model_called", None, {"role": role, "provider": provider_name})
     return provider.complete(messages, constraints)
+
+
+def list_models(provider_name: str) -> list[str]:
+    info = get_provider(provider_name)
+    if not info:
+        return []
+    base_url = info.get("base_url", "https://openrouter.ai/api/v1").rstrip("/")
+    request = urllib.request.Request(
+        f"{base_url}/models",
+        headers={"Authorization": f"Bearer {info.get('api_key', '')}"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except Exception:
+        return []
+    models = []
+    for item in data.get("data", []):
+        model_id = item.get("id")
+        if model_id:
+            models.append(model_id)
+    return sorted(models)

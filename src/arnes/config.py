@@ -52,10 +52,9 @@ def validate_config(config: dict) -> list[str]:
     if not evaluador_provider:
         errors.append("El proveedor del evaluador no puede estar vacio.")
 
-    if (
-        config["roles"]["tutor"].get("model") == config["roles"]["evaluador"].get("model")
-        and tutor_provider == evaluador_provider
-    ):
+    tutor_model = config["roles"]["tutor"].get("model")
+    evaluador_model = config["roles"]["evaluador"].get("model")
+    if tutor_model and evaluador_model and tutor_model == evaluador_model and tutor_provider == evaluador_provider:
         errors.append("El tutor y el evaluador no pueden ser el mismo modelo del mismo proveedor.")
 
     panel = config.get("panel", {})

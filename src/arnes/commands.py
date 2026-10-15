@@ -9,6 +9,7 @@ from .config import DEFAULT_CONFIG, load_config, save_config, validate_config
 from .credentials import load_credentials, save_credentials
 from .paths import app_dir, session_dir
 from .planner import generate_plan, parse_plan
+from .provider import list_models
 from .store import create_session, load_session, save_session, load_estado, save_estado
 
 console = Console()
@@ -93,6 +94,16 @@ def cmd_settings() -> None:
                 break
             continue
         if option == "1":
+            providers_seen = set()
+            for provider_name in (tutor["provider"], evaluador["provider"]):
+                if provider_name in providers_seen:
+                    continue
+                providers_seen.add(provider_name)
+                remote_models = list_models(provider_name)
+                if remote_models:
+                    console.print(f"Modelos disponibles para {provider_name} (primeros 20):")
+                    for model_name in remote_models[:20]:
+                        console.print(f"  {model_name}")
             config["roles"]["tutor"]["provider"] = _input(f"Provider tutor [{tutor['provider']}]: ").strip() or tutor["provider"]
             config["roles"]["tutor"]["model"] = _input(f"Modelo tutor [{tutor.get('model', '')}]: ").strip()
             temp = _input(f"Temperatura tutor [{tutor['temperature']}]: ").strip()
