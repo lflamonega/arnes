@@ -383,6 +383,11 @@ def run_repl() -> None:
         console.print("Bienvenido al arnes. No hay credenciales configuradas.")
         cmd_connect()
 
+    config = load_config()
+    if not config.get("roles", {}).get("tutor", {}).get("model"):
+        console.print("Antes de crear una sesion, configura el modelo del tutor en /settings.")
+        cmd_settings()
+
     sessions = list_sessions()
     if not sessions:
         cmd_new()

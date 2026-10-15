@@ -59,8 +59,8 @@ def validate_config(config: dict) -> list[str]:
         errors.append("El tutor y el evaluador no pueden ser el mismo modelo del mismo proveedor.")
 
     panel = config.get("panel", {})
-    if panel.get("enabled", True):
-        if not panel.get("evaluator_models"):
-            errors.append("El panel necesita al menos un modelo evaluador.")
+    enabled = panel.get("enabled", bool(panel.get("evaluator_models")))
+    if enabled and not panel.get("evaluator_models"):
+        errors.append("El panel necesita al menos un modelo evaluador.")
 
     return errors
