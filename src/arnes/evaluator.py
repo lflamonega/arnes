@@ -1,105 +1,71 @@
-import json
-import re
 import statistics
 
-from .config import load_config
+from .config import evaluator_specs, require_ready
+from .errors import ValidationError
+from .prompts import request_prompt
 from .provider import infer
-
-
-def _extract_json(text: str) -> dict:
-    text = text or ""
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    candidate = match.group(0) if match else text.strip()
-    return json.loads(candidate)
+from .validator import json_object, require_text, score_number, validated_text
 
 
 def evaluate(response: str, rubric: dict, concept: dict, config: dict) -> dict:
-    if not isinstance(config, dict) or not config:
-        config = load_config()
-    dimensions = {}
-    if isinstance(rubric, dict):
-        if "dimensions" in rubric and isinstance(rubric["dimensions"], dict):
-            dimensions = rubric["dimensions"]
-        else:
-            dimensions = rubric
-    if not dimensions:
-        dimensions = {"comprension": "Comprension general"}
+    """Treat an incomplete or invalid panel as a technical error, never a zero score."""
+    require_ready(config)
+    dimensions = rubric
+    if not isinstance(dimensions, dict) or not dimensions:
+        raise ValidationError("No hay dimensiones de evaluación.")
+    # Withhold prior grades and self-assessments to reduce anchoring bias.
+    context = {
+        key: concept[key] for key in ("goal", "concept", "exercise", "sources") if key in concept
+    }
+    context.update(rubric=dimensions, response=response)
+    constraints, body, system = request_prompt("evaluator.score.md", context, role="evaluator")
+    evaluations = []
+    for spec in evaluator_specs(config):
+        output = infer(
+            "evaluator",
+            body,
+            constraints,
+            system=system,
+            model=spec["model"],
+            provider_name=spec["provider"],
+            config=config,
+        )
+        parsed = json_object(validated_text(output, constraints))
+        scores = parsed.get("scores")
+        if not isinstance(scores, dict) or set(scores) != set(dimensions):
+            raise ValidationError(
+                "El evaluador no devolvió exactamente las dimensiones de la rúbrica. El intento no se calificó."
+            )
+        cleaned = {name: score_number(scores[name], name) for name in dimensions}
+        feedback = require_text(parsed.get("feedback"), "Feedback del evaluador", maximum=8000)
+        evaluations.append({**spec, "scores": cleaned, "feedback": feedback})
 
-    concept_name = concept.get("concept", "") if isinstance(concept, dict) else str(concept)
-    dimensions_text = "\n".join(f"- {name}: {desc}" for name, desc in dimensions.items())
-    constraints, body = (None, None)
-    from .prompts import build_prompt
-
-    constraints, body = build_prompt(
-        "evaluator.rubric.md",
-        {
-            "concepto": concept_name,
-            "rubric_dimensions": dimensions_text,
-            "respuesta": response,
-        },
-    )
-
-    model_scores = []
-    panel_models = config.get("panel", {}).get("evaluator_models", [])
-    if not panel_models:
-        # fallback to evaluador role model marker not available; evaluation cannot run
-        panel_models = []
-
-    for model_name in panel_models:
-        output = infer("evaluador", body, constraints)
-        try:
-            parsed = _extract_json(output)
-        except (json.JSONDecodeError, ValueError):
-            parsed = {}
-        cleaned = {}
-        for dimension in dimensions:
-            try:
-                cleaned[dimension] = float(parsed.get(dimension, 0.0))
-            except (TypeError, ValueError):
-                cleaned[dimension] = 0.0
-        model_scores.append(cleaned)
-
-    if not model_scores:
-        median_scores = {dimension: 0.0 for dimension in dimensions}
-        variance = 0.0
-    else:
-        median_scores = {}
-        variances = {}
-        for dimension in dimensions:
-            values = [score.get(dimension, 0.0) for score in model_scores]
-            median_scores[dimension] = float(statistics.median(values)) if values else 0.0
-            if len(values) > 1:
-                variances[dimension] = statistics.pvariance(values)
-            else:
-                variances[dimension] = 0.0
-        variance = max(variances.values()) if variances else 0.0
-
-    aggregate = sum(median_scores.values()) / len(median_scores) if median_scores else 0.0
-
-    thresholds = config.get("thresholds", {})
-    aggregate_threshold = float(thresholds.get("aggregate", 0.75))
-    dimension_floor = float(thresholds.get("dimension_floor", 0.5))
-    variance_max = float(thresholds.get("variance_max", 0.3))
-
-    flagged = variance > variance_max
+    medians = {
+        name: float(statistics.median(item["scores"][name] for item in evaluations))
+        for name in dimensions
+    }
+    variances = {
+        name: statistics.pvariance(item["scores"][name] for item in evaluations)
+        for name in dimensions
+    }
+    variance = max(variances.values())
+    aggregate = statistics.mean(medians.values())
+    thresholds = dict(config["thresholds"])
+    flagged = variance > thresholds["variance_max"]
     passed = (
-        aggregate >= aggregate_threshold
-        and all(score >= dimension_floor for score in median_scores.values())
-        and variance <= variance_max
+        not flagged
+        and aggregate >= thresholds["aggregate"]
+        and min(medians.values()) >= thresholds["dimension_floor"]
     )
-    if flagged:
-        passed = False
-
-    rationale = f"Evaluated by {len(panel_models)} model(s)."
-    if flagged:
-        rationale += " Flagged for high variance."
-
+    feedback = "\n\n".join(dict.fromkeys(item["feedback"] for item in evaluations))
     return {
-        "scores": median_scores,
+        "scores": medians,
         "aggregate": aggregate,
         "variance": variance,
+        "variances": variances,
         "flagged": flagged,
         "passed": passed,
-        "rationale": rationale,
+        "feedback": feedback,
+        "evaluations": evaluations,
+        "thresholds": thresholds,
     }
-

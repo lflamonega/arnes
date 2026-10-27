@@ -1,298 +1,348 @@
-import os
-from pathlib import Path
+import getpass
 
 from rich.console import Console
-from rich.panel import Panel
+from rich.markdown import Markdown
 from rich.table import Table
-from prompt_toolkit import PromptSession
-from prompt_toolkit.completion import WordCompleter
+from rich.text import Text
 
-from .config import DEFAULT_CONFIG, load_config, save_config, validate_config
-from .credentials import load_credentials, save_credentials
-from .paths import app_dir, session_dir
-from .planner import generate_plan, parse_plan
+from .config import evaluator_specs, load_config, require_ready, save_config
+from .credentials import get_provider, load_credentials, save_credentials
+from .errors import ArnesError
+from .learning import LearningSession
+from .paths import config_path, credentials_path, session_dir
+from .planner import accept_plan, generate_plan, load_plan
 from .provider import list_models
-from .store import create_session, load_session, save_session, load_estado, save_estado
-
-console = Console()
-
-
-def cmd_help() -> None:
-    table = Table(title="Comandos")
-    table.add_column("Comando", style="bold")
-    table.add_column("Descripcion")
-    descriptions = {
-        "/help": "Muestra esta ayuda.",
-        "/settings": "Edita configuracion.",
-        "/connect": "Configura credenciales.",
-        "/new": "Crea una nueva sesion.",
-        "/status": "Muestra estado de la sesion.",
-        "/quit": "Guarda y sale.",
-    }
-    for command, description in descriptions.items():
-        table.add_row(command, description)
-    console.print(table)
-
-
-def _input(prompt: str) -> str:
-    try:
-        return input(prompt)
-    except EOFError:
-        return ""
-
-
-def _prompt_model(prompt: str, choices: list[str], default: str = "") -> str:
-    if not choices:
-        return _input(f"{prompt} [{default}]: ").strip() or default
-    completer = WordCompleter(choices, ignore_case=True, match_middle=True)
-    session = PromptSession(completer=completer)
-    try:
-        value = session.prompt(f"{prompt} [{default}]: ", complete_while_typing=True)
-    except (KeyboardInterrupt, EOFError):
-        return default
-    return value.strip() or default
-
-
-def cmd_connect() -> None:
-    provider = _input("? Proveedor [openrouter]: ").strip() or "openrouter"
-    api_key = _input("? API key: ").strip()
-    default_url = "https://openrouter.ai/api/v1"
-    base_url = _input(f"? Base URL [{default_url}]: ").strip() or default_url
-
-    creds = load_credentials()
-    creds[provider] = {"api_key": api_key, "base_url": base_url}
-    save_credentials(creds)
-    console.print(f"[green]Credenciales guardadas en {app_dir() / 'credentials.json'}[/green]")
-
-    role = _input("? Asignar este proveedor a un rol? [tutor/evaluador/ninguno]: ").strip()
-    if role:
-        console.print(f"Rol asignado: {role}")
-
-
-def _save_settings(config: dict) -> bool:
-    errors = validate_config(config)
-    if errors:
-        for error in errors:
-            console.print(f"[red]{error}[/red]")
-        return False
-    save_config(config)
-    return True
-
-
-def cmd_settings() -> None:
-    config = load_config()
-    while True:
-        tutor = config["roles"]["tutor"]
-        evaluador = config["roles"]["evaluador"]
-        panel = config.get("panel", {})
-        thresholds = config["thresholds"]
-        ui = config["ui"]
-
-        console.print(Panel(
-            f"1. Roles\n"
-            f"    tutor: {tutor['provider']}/{tutor.get('model', '')}\n"
-            f"    evaluador: {evaluador['provider']}/{evaluador.get('model', '')}\n"
-            f"2. Panel\n"
-            f"    {panel.get('evaluator_models', [])}\n"
-            f"3. Umbrales\n"
-            f"    agregado: {thresholds['aggregate']:.2f}  "
-            f"piso: {thresholds['dimension_floor']:.2f}  "
-            f"var: {thresholds['variance_max']:.2f}\n"
-            f"4. UI\n"
-            f"    mostrar puntajes: {ui['show_scores']}",
-            title="Configuracion",
-        ))
-        option = _input("Selecciona una opcion [1-4] o Enter para salir: ").strip()
-        if option == "":
-            if _save_settings(config):
-                break
-            continue
-        if option == "1":
-            providers_seen = set()
-            for provider_name in (tutor["provider"], evaluador["provider"]):
-                if provider_name in providers_seen:
-                    continue
-                providers_seen.add(provider_name)
-                remote_models = list_models(provider_name)
-                if remote_models:
-                    console.print(f"Modelos disponibles para {provider_name} (primeros 20):")
-                    for model_name in remote_models[:20]:
-                        console.print(f"  {model_name}")
-            tutor_provider = _input(f"Provider tutor [{tutor['provider']}]: ").strip() or tutor["provider"]
-            tutor_models = list_models(tutor_provider)
-            if tutor_models:
-                console.print(f"Modelos disponibles para {tutor_provider} ({len(tutor_models)}). Escribe para filtrar.")
-            tutor_model = _prompt_model("Modelo tutor", tutor_models, tutor.get("model", ""))
-            temp = _input(f"Temperatura tutor [{tutor['temperature']}]: ").strip()
-            if temp:
-                tutor["temperature"] = float(temp)
-
-            evaluador_provider = _input(f"Provider evaluador [{evaluador['provider']}]: ").strip() or evaluador["provider"]
-            evaluador_models = list_models(evaluador_provider)
-            if evaluador_models:
-                console.print(f"Modelos disponibles para {evaluador_provider} ({len(evaluador_models)}). Escribe para filtrar.")
-            evaluador_model = _prompt_model("Modelo evaluador", evaluador_models, evaluador.get("model", ""))
-            temp = _input(f"Temperatura evaluador [{evaluador['temperature']}]: ").strip()
-            if temp:
-                evaluador["temperature"] = float(temp)
-
-            config["roles"]["tutor"]["provider"] = tutor_provider
-            config["roles"]["tutor"]["model"] = tutor_model
-            config["roles"]["tutor"]["temperature"] = tutor["temperature"]
-            config["roles"]["evaluador"]["provider"] = evaluador_provider
-            config["roles"]["evaluador"]["model"] = evaluador_model
-            config["roles"]["evaluador"]["temperature"] = evaluador["temperature"]
-        elif option == "2":
-            raw = _input("Modelos del panel (separados por coma): ").strip()
-            if raw:
-                config["panel"]["evaluator_models"] = [item.strip() for item in raw.split(",") if item.strip()]
-        elif option == "3":
-            agg = _input(f"Agregado [{thresholds['aggregate']}]: ").strip()
-            if agg:
-                config["thresholds"]["aggregate"] = float(agg)
-            floor = _input(f"Piso [{thresholds['dimension_floor']}]: ").strip()
-            if floor:
-                config["thresholds"]["dimension_floor"] = float(floor)
-            var = _input(f"Varianza max [{thresholds['variance_max']}]: ").strip()
-            if var:
-                config["thresholds"]["variance_max"] = float(var)
-        elif option == "4":
-            raw = _input(f"Mostrar puntajes [{ui['show_scores']}]: ").strip().lower()
-            if raw in ("true", "false"):
-                config["ui"]["show_scores"] = raw == "true"
-        else:
-            console.print("Opcion invalida.")
-
-
-def cmd_new() -> str | None:
-    logro = _input("? Que queres lograr? Ej: \"Entender derivadas para resolver problemas de optimizacion\"\n> ").strip()
-    if not logro:
-        console.print("Logro vacio.")
-        return None
-    raw = _input("? Fuentes (marcar varias separadas por coma, ej: 1,3):\n  1. Conocimiento del modelo\n  2. Busqueda en internet\n  3. Mis propios archivos\n> ").strip()
-    selected_numbers = [item.strip() for item in raw.split(",") if item.strip()]
-    mapping = {"1": "modelo", "2": "web", "3": "usuario"}
-    fuentes = [mapping[number] for number in selected_numbers if number in mapping]
-    if not fuentes:
-        fuentes = ["modelo"]
-    names = {
-        "modelo": "conocimiento del modelo",
-        "web": "busqueda en internet",
-        "usuario": "mis propios archivos",
-    }
-    console.print("Fuentes seleccionadas: " + ", ".join(names[item] for item in fuentes) + ".")
-
-    session_id = create_session(logro, fuentes)
-    console.print("Creando sesion...")
-    user_dir = session_dir(session_id) / "fuentes" / "usuario"
-    console.print(f"Directorio de fuentes: ~/.arnes/sessions/{session_id}/fuentes/")
-    if "usuario" in fuentes:
-        console.print("Deja tus archivos .txt o .md en:")
-        console.print(f"  {user_dir}")
-        _input("Presiona Enter cuando hayas terminado.\n")
-        files = [p for p in user_dir.iterdir() if p.is_file()] if user_dir.exists() else []
-        if not files:
-            answer = _input("El directorio esta vacio. Continuar? [S/n]: ").strip().lower()
-            if answer not in ("", "s", "si"):
-                _input("Presiona Enter cuando hayas terminado.\n")
-
-    console.print("Generando plan. Esto puede tardar unos segundos...")
-    with console.status("Consultando al modelo y construyendo el plan..."):
-        generate_plan(session_id)
-    console.print("Plan generado.")
-    plan_path = session_dir(session_id) / "plan.md"
-    plan_text = plan_path.read_text(encoding="utf-8") if plan_path.exists() else ""
-    concepts, rubric = parse_plan(plan_text)
-
-    estado = load_estado(session_id)
-    estado["concepts"] = concepts
-    estado["rubric"] = rubric
-    save_estado(session_id, estado)
-
-    from rich.markdown import Markdown
-
-    console.print(Panel(Markdown(plan_text), title="Plan de aprendizaje"))
-    answer = _input("? Aceptar el plan? [S/n]: ").strip().lower()
-    if answer in ("", "s", "si"):
-        sess = load_session(session_id)
-        sess["locked"] = True
-        save_session(session_id, sess)
-        console.print("Plan aceptado. Comenzando enseñanza.")
-        # Activate session in REPL by importing lazily.
-        try:
-            import arnes.repl as repl_mod
-
-            repl_mod._activate_session(session_id)
-            repl_mod.present_diagnostic(session_id)
-        except Exception:
-            pass
-    else:
-        console.print("Podes editar el plan a mano en:")
-        console.print(f"  {session_dir(session_id) / 'plan.md'}")
-    return session_id
-
-
-def cmd_status(session_id: str | None) -> None:
-    if not session_id:
-        console.print("No hay sesion activa.")
-        return
-    session = load_session(session_id)
-    estado = load_estado(session_id)
-    table = Table(title="Estado")
-    table.add_column("Campo")
-    table.add_column("Valor")
-    table.add_row("Sesion", session_id)
-    table.add_row("Logro", session.get("logro", ""))
-    table.add_row("Concepto actual", str(estado.get("current_concept_index", 0)))
-    table.add_row("Intentos totales", str(estado.get("total_attempts", 0)))
-    table.add_row("Bloqueado", str(session.get("locked", False)))
-    console.print(table)
-
-
-def cmd_quit(session_id: str | None) -> str:
-    if session_id:
-        try:
-            estado = load_estado(session_id)
-            save_estado(session_id, estado)
-        except FileNotFoundError:
-            pass
-    console.print("Guardado. Hasta luego.")
-    return "quit"
-
+from .sources import import_files, load_sources
+from .store import create_session, list_sessions, load_session
+from .validator import require_text
 
 COMMANDS = {
-    "/help": cmd_help,
-    "/settings": cmd_settings,
-    "/connect": cmd_connect,
-    "/new": cmd_new,
-    "/status": cmd_status,
-    "/quit": cmd_quit,
+    "/help": "Ayuda y atajos",
+    "/connect": "Guardar credenciales (clave oculta)",
+    "/settings": "Configurar roles, panel y umbrales",
+    "/models": "Listar modelos: /models [proveedor]",
+    "/new": "Crear un objetivo y un plan",
+    "/plan": "Ver plan; /plan generar regenera un borrador",
+    "/accept": "Aceptar el plan.json revisado",
+    "/sources": "Ver fuentes y su procedencia",
+    "/sessions": "Listar sesiones guardadas",
+    "/resume": "Retomar: /resume ID",
+    "/continue": "Mostrar el ejercicio guardado o generar el siguiente",
+    "/status": "Consultar progreso y último feedback",
+    "/quit": "Salir (el progreso ya está guardado)",
 }
 
 
-def handle_command(text: str, session_id: str | None) -> str | None:
-    parts = text.strip().split(maxsplit=1)
-    command = parts[0]
-    if command not in COMMANDS:
-        console.print(f"Comando desconocido: {command}")
-        return None
-    func = COMMANDS[command]
-    if command in ("/status", "/quit"):
-        result = func(session_id)
-    elif command == "/new":
-        result = func()
-    else:
-        result = func()
-    if result == "quit":
-        return "quit"
-    # Keep active session in sync if /new created one.
-    if command == "/new" and isinstance(result, str):
-        try:
-            import arnes.repl as repl_mod
+ROLE_LABELS = {"tutor": "Tutor", "evaluator": "Evaluador"}
+THRESHOLD_LABELS = {
+    "aggregate": "Promedio mínimo",
+    "dimension_floor": "Piso por dimensión",
+    "variance_max": "Varianza máxima",
+}
+STATE_LABELS = {
+    "DIAGNOSE": "Diagnóstico",
+    "PRESENT": "Presentación pendiente",
+    "AWAIT_ATTEMPT": "Esperando respuesta",
+    "FREE_MODE": "Consulta libre",
+    "DONE": "Completado",
+}
 
-            repl_mod._current_session_id = result
-            if repl_mod._current_state is None:
-                repl_mod._activate_session(result)
-        except Exception:
-            pass
-    return None
+
+def render_plan(plan: dict) -> str:
+    """Render a structured plan for the Spanish terminal UI."""
+    lines = ["# Plan de aprendizaje", "", plan["goal"], "", "## Secuencia de conceptos"]
+    for i, concept in enumerate(plan["concepts"], 1):
+        lines += [f"\n### {i}. {concept['title']}", concept["objective"]]
+        for citation in concept["citations"]:
+            lines.append(f"- [{citation['source_id']}] «{citation['quote']}»")
+    lines += ["\n## Rúbrica"]
+    lines += [
+        f"- **{dimension['label']}**: {dimension['description']}"
+        for dimension in plan["rubric"].values()
+    ]
+    lines += ["\nLos umbrales efectivos se toman de /settings y se registran con cada intento."]
+    return "\n".join(lines) + "\n"
+
+
+def _input(prompt: str, default: str = "") -> str:
+    # EOF or cancellation must abort the command rather than imply consent.
+    value = input(f"{prompt}" + (f" [{default}]" if default else "") + ": ").strip()
+    return value or default
+
+
+def _yes(prompt: str, *, default: bool = False) -> bool:
+    return _input(
+        prompt + (" [S/n]" if default else " [s/N]"), "s" if default else "n"
+    ).casefold() in ("s", "si", "sí")
+
+
+class Application:
+    def __init__(self, console: Console | None = None):
+        self.console = console or Console()
+        self.active: LearningSession | None = None
+
+    def show(self, text: str) -> None:
+        self.console.print(Markdown(text))
+
+    def current(self) -> LearningSession:
+        if self.active is None:
+            raise ArnesError("No hay sesión activa. Usá /new o /resume ID.")
+        return self.active
+
+    def resume(self, session_id: str) -> None:
+        candidate = LearningSession(session_id)
+        view = candidate.view()
+        self.active = candidate
+        self.console.print(f"Sesión: {session_id}", markup=False)
+        self.show(view)
+
+    def handle(self, text: str) -> bool:
+        if not text.startswith("/"):
+            learning = self.current()
+            with self.console.status("Consultando al modelo si es necesario..."):
+                output = learning.respond(text)
+            self.show(output)
+            # Presentation is separate from committing the grade so failures cannot erase it.
+            if learning.state()["current_state"] == "PRESENT":
+                self.continue_session()
+            return True
+        parts = text.split(maxsplit=1)
+        command, argument = parts[0], parts[1].strip() if len(parts) > 1 else ""
+        if command not in COMMANDS:
+            raise ArnesError("Comando desconocido. Usá /help.")
+        if command == "/quit":
+            self.console.print("Progreso guardado. Hasta luego.")
+            return False
+        if argument and command not in ("/resume", "/models", "/plan"):
+            raise ArnesError(f"{command} no recibe argumentos.")
+        handlers = {
+            "/help": self.help,
+            "/connect": self.connect,
+            "/settings": self.settings,
+            "/new": self.new,
+            "/accept": self.accept,
+            "/sources": self.sources,
+            "/sessions": self.sessions,
+            "/continue": self.continue_session,
+            "/status": self.status,
+        }
+        if command == "/resume":
+            if not argument:
+                raise ArnesError("Uso: /resume ID. Consultá los IDs con /sessions.")
+            self.resume(argument)
+        elif command == "/models":
+            provider = argument or load_config()["roles"]["tutor"]["provider"]
+            with self.console.status("Consultando modelos..."):
+                models = list_models(provider)
+            self.console.print("\n".join(models) or "No hay modelos disponibles.", markup=False)
+        elif command == "/plan":
+            self.plan(argument)
+        else:
+            handlers[command]()
+        return True
+
+    def help(self) -> None:
+        table = Table(title="arnes — comandos")
+        table.add_column("Comando")
+        table.add_column("Descripción")
+        for command, description in COMMANDS.items():
+            table.add_row(command, Text(description))
+        self.console.print(table)
+        self.show(
+            "Escribí **pista** durante un ejercicio. **libre** abre consultas sin nota; **volver** retoma el plan. Ctrl+C cancela una operación; Ctrl+D sale.\n\nSi una API falla, no se inventan puntajes. Reenviá tu respuesta o usá /continue para ver qué quedó pendiente."
+        )
+
+    def connect(self) -> None:
+        provider = _input("Proveedor", "openrouter")
+        key = getpass.getpass("API key (no se muestra): ").strip()
+        base_url = _input("URL base", "https://openrouter.ai/api/v1")
+        credentials = load_credentials()
+        credentials[provider] = {"api_key": key, "base_url": base_url}
+        save_credentials(credentials)
+        self.console.print(
+            f"Credenciales guardadas sin cifrar en {credentials_path()}.", markup=False
+        )
+        selection = _input(
+            "Asignar proveedor a tutor/evaluador/ambos/ninguno", "ninguno"
+        ).casefold()
+        assignments = {
+            "tutor": ("tutor",),
+            "evaluador": ("evaluator",),
+            "ambos": ("tutor", "evaluator"),
+            "ninguno": (),
+        }
+        if selection not in assignments:
+            raise ArnesError(
+                "Rol desconocido. Las credenciales se guardaron, pero no se cambió ningún rol."
+            )
+        if assignments[selection]:
+            config = load_config()
+            for role in assignments[selection]:
+                config["roles"][role]["provider"] = provider
+            save_config(config)
+            self.console.print("Asignación guardada.")
+
+    def settings(self) -> None:
+        config = load_config()
+        table = Table(title="Configuración")
+        table.add_column("Campo")
+        table.add_column("Valor")
+        for name, label in ROLE_LABELS.items():
+            role = config["roles"][name]
+            table.add_row(label, Text(f"{role['provider']} / {role['model'] or 'sin configurar'}"))
+            table.add_row(f"Temperatura del {label.lower()}", str(role["temperature"]))
+        panel = evaluator_specs(config) if config["panel"]["evaluator_models"] else []
+        table.add_row(
+            "Panel",
+            Text(
+                ", ".join(f"{item['provider']} / {item['model']}" for item in panel)
+                or "Sólo el evaluador principal"
+            ),
+        )
+        for key, label in THRESHOLD_LABELS.items():
+            table.add_row(label, str(config["thresholds"][key]))
+        table.add_row("Mostrar puntajes", "Sí" if config["ui"]["show_scores"] else "No")
+        self.console.print(table)
+        self.console.print(f"Archivo editable: {config_path()}", markup=False)
+        option = _input("Editar: 1 roles, 2 panel, 3 umbrales, 4 puntajes, Enter para volver")
+        if not option:
+            return
+        if option == "1":
+            for name, label in ROLE_LABELS.items():
+                role = config["roles"][name]
+                role["provider"] = _input(f"Proveedor del {label.lower()}", role["provider"])
+                role["model"] = _input(
+                    f"Modelo del {label.lower()} (IDs disponibles con /models)", role["model"]
+                )
+                role["temperature"] = self._float(
+                    f"Temperatura del {label.lower()}", role["temperature"]
+                )
+        elif option == "2":
+            self.console.print(
+                "Modelos separados por coma, del proveedor evaluador. '-' usa sólo el evaluador. Para múltiples proveedores, editá config.json."
+            )
+            raw = _input("Panel")
+            if not raw:
+                return
+            config["panel"] = {
+                "evaluator_models": []
+                if raw == "-"
+                else [item.strip() for item in raw.split(",") if item.strip()]
+            }
+        elif option == "3":
+            for key, label in THRESHOLD_LABELS.items():
+                config["thresholds"][key] = self._float(label, config["thresholds"][key])
+        elif option == "4":
+            config["ui"]["show_scores"] = _yes(
+                "Mostrar puntajes", default=config["ui"]["show_scores"]
+            )
+        else:
+            raise ArnesError("Opción inválida; no se guardaron cambios.")
+        save_config(config)
+        self.console.print("Configuración guardada.")
+
+    @staticmethod
+    def _float(label: str, default: float) -> float:
+        try:
+            return float(_input(label, str(default)))
+        except ValueError as exc:
+            raise ArnesError("Se esperaba un número. No se guardaron cambios.") from exc
+
+    def new(self) -> None:
+        config = load_config()
+        require_ready(config)
+        for spec in [config["roles"]["tutor"], *evaluator_specs(config)]:
+            if not get_provider(spec["provider"]):
+                raise ArnesError(f"Faltan credenciales para {spec['provider']}. Usá /connect.")
+        goal = require_text(_input("¿Qué querés lograr?"), "Objetivo", maximum=3000)
+        raw = _input("Archivos .txt/.md UTF-8 separados por ';' (Enter: ninguno)")
+        paths = [item.strip().strip('"') for item in raw.split(";") if item.strip()]
+        use_model = _yes(
+            "¿Agregar apuntes generados por el modelo? (no son fuentes verificadas)",
+            default=not paths,
+        )
+        if not paths and not use_model:
+            raise ArnesError("Elegí al menos una fuente.")
+        self.show(
+            "**Privacidad y costo:** el contenido de las fuentes, tus respuestas y el contexto se enviarán a los proveedores configurados. Cada ejercicio puede implicar varias llamadas facturables. No hay búsqueda web automática."
+        )
+        if not _yes("¿Continuar?"):
+            return
+        session_id = create_session(
+            goal, (["user"] if paths else []) + (["model"] if use_model else [])
+        )
+        self.active = LearningSession(session_id)
+        self.console.print(f"Borrador creado: {session_id}", markup=False)
+        import_files(session_id, paths)
+        self.plan("generar")
+        if _yes("¿Aceptar este plan?", default=True):
+            self.accept()
+        else:
+            self.console.print(
+                f"Editá {session_dir(session_id) / 'plan.json'}, revisá /plan y usá /accept.",
+                markup=False,
+            )
+
+    def plan(self, argument: str = "") -> None:
+        session_id = self.current().session_id
+        if argument and argument != "generar":
+            raise ArnesError("Uso: /plan o /plan generar.")
+        if argument == "generar":
+            with self.console.status("Generando y verificando el plan..."):
+                plan = generate_plan(session_id)
+        else:
+            plan = load_plan(session_id)
+        self.show(render_plan(plan))
+
+    def accept(self) -> None:
+        accept_plan(self.current().session_id)
+        self.show(self.current().view())
+
+    def sources(self) -> None:
+        sources = load_sources(self.current().session_id)
+        table = Table(title="Fuentes (snapshots locales)")
+        for label in ("ID", "Nombre", "Procedencia", "Caracteres"):
+            table.add_column(label)
+        for source in sources:
+            table.add_row(
+                Text(source["id"]),
+                Text(source.get("title", "")),
+                "Modelo — no verificada" if source["kind"] == "model" else "Archivo del usuario",
+                str(len(source["text"])),
+            )
+        self.console.print(table)
+        self.console.print("Las citas prueban presencia del texto, no la veracidad de la fuente.")
+
+    def sessions(self) -> None:
+        table = Table(title="Sesiones")
+        for label in ("ID", "Objetivo", "Plan"):
+            table.add_column(label)
+        for session_id in list_sessions():
+            try:
+                session = load_session(session_id)
+                table.add_row(
+                    session_id,
+                    Text(session["goal"][:100]),
+                    "Aceptado" if session.get("locked") else "Borrador",
+                )
+            except ArnesError:
+                table.add_row(session_id, "No se pudo leer; revisá los archivos", "Error")
+        self.console.print(table)
+
+    def continue_session(self) -> None:
+        with self.console.status("Preparando el ejercicio..."):
+            output = self.current().present()
+        self.show(output)
+
+    def status(self) -> None:
+        learning = self.current()
+        session = load_session(learning.session_id)
+        state = learning.state()
+        self.console.print(
+            f"Sesión: {learning.session_id}\nEstado: {STATE_LABELS.get(state['current_state'], 'Desconocido')}\nPlan aceptado: {'Sí' if session['locked'] else 'No'}",
+            markup=False,
+        )
+        if session.get("locked"):
+            self.show(learning.summary())
+        if state.get("last_feedback"):
+            self.show("### Último feedback\n\n" + state["last_feedback"])

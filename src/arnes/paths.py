@@ -1,31 +1,31 @@
 import os
+import re
 from pathlib import Path
+
+from .errors import ArnesError
 
 
 def app_dir() -> Path:
-    """Devuelve el directorio raiz del arnes. Override por env ARNES_HOME."""
-    env = os.environ.get("ARNES_HOME")
-    if env:
-        return Path(env)
-    return Path.home() / ".arnes"
+    return Path(os.environ.get("ARNES_HOME") or Path.home() / ".arnes").expanduser()
 
 
 def ensure_app_dir() -> Path:
-    """Crea el directorio raiz y subdirectorios base si no existen."""
     root = app_dir()
-    root.mkdir(parents=True, exist_ok=True)
-    (root / "prompts").mkdir(exist_ok=True)
-    (root / "sessions").mkdir(exist_ok=True)
-    (root / "logs").mkdir(exist_ok=True)
+    for name in ("prompts", "sessions", "logs"):
+        (root / name).mkdir(parents=True, exist_ok=True)
     return root
 
 
 def session_dir(session_id: str) -> Path:
+    if not isinstance(session_id, str) or not re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9_-]{0,99}", session_id
+    ):
+        raise ArnesError("Identificador de sesión inválido.")
     return app_dir() / "sessions" / session_id
 
 
 def sources_dir(session_id: str) -> Path:
-    return session_dir(session_id) / "fuentes"
+    return session_dir(session_id) / "sources"
 
 
 def prompts_dir() -> Path:
