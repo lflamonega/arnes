@@ -54,4 +54,4 @@ if ! arnes --version >/dev/null 2>&1; then
     exit 1
 fi
 
-echo "arnes v0.0.1 instalado. Ejecuta 'arnes' para comenzar."
+echo "arnes instalado. Ejecuta 'arnes' para comenzar."

@@ -44,4 +44,4 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-Write-Host "arnes v0.0.1 instalado. Ejecuta 'arnes' para comenzar."
+Write-Host "arnes instalado. Ejecuta 'arnes' para comenzar."
